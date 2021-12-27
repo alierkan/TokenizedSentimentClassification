@@ -50,7 +50,7 @@ def get_glove_data(glove_dir, file):
         except Exception:
             print(values[1:])
         norm = np.sqrt((coefs ** 2).sum())
-        glove_dict[word] = coefs /norm
+        glove_dict[word] = coefs / norm
     f.close()
     print('Found %s word vectors.' % len(glove_dict))
     return glove_dict
@@ -134,3 +134,16 @@ def get_token_matrix(model, review, max_rlen, ncols, glove_dict, gm):
             wv = np.append(wv, glove)
         token_list[t] = wv
     return token_list
+
+
+def get_shuffle_list_neutral2(file_pos, file_neg, shuffle, stop_words):
+    xylist = []
+    list_pos = MyReviews(file_pos)
+    list_neg = MyReviews(file_neg)
+    for t in list_pos:
+        xylist.append((t, 1.))
+    for t in list_neg:
+        xylist.append((t, 0.))
+    if shuffle:
+        random.shuffle(xylist)
+    return xylist

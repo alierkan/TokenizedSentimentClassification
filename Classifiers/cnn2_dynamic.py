@@ -3,8 +3,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn.metrics import accuracy_score
-from src import constants as con
-from src import utils
+import utils
 import time
 
 DATA_SIZE = 8192
@@ -80,8 +79,8 @@ def main():
     vw_model = utils.get_word2vec_model(PATH + 'word2vec/all_word2vector', NCOLS, NWIN)
     vw_model.vectors = utils.normalize2(vw_model.vectors)
     glove_dict = utils.get_glove_data(PATH + 'glove/', 'vectors' + '.txt')
-    vocab_txt_to_id, max_rlen = utils.toNumber(PATH + "all.txt")
-    vocab_id_to_txt = {v: k for k, v in vocab_txt_to_id.items()}
+    vocab_txt_to_id, max_rlen = utils.to_number(PATH + "all.txt")
+    # vocab_id_to_txt = {v: k for k, v in vocab_txt_to_id.items()}
     vocabs = list(vocab_txt_to_id.keys())
     pretrained_embeddings = get_pretrained(vocab_txt_to_id, vw_model, vocabs, glove_dict)
 
@@ -155,6 +154,7 @@ def main():
     print("### ACCURACIES ###")
     for accuracy in accuracies:
         print(f'{accuracy:.8f}')
+
 
 if __name__ == "__main__":
     is_cuda = torch.cuda.is_available()

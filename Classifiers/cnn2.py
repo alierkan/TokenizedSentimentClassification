@@ -1,10 +1,9 @@
-from src import utils
+import utils
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from src import constants as con
 import time
 
 DATA_SIZE = 1024
@@ -73,6 +72,7 @@ class SimpleCNN(nn.Module):
         x = torch.relu(x)
         x = self.fc2(x)
         return x
+
 
 def main():
     stop_words = utils.get_stopwords()
