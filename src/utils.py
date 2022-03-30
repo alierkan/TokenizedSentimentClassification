@@ -136,7 +136,7 @@ def get_token_matrix(model, review, max_rlen, ncols, glove_dict, gm):
     return token_list
 
 
-def get_shuffle_list_neutral2(file_pos, file_neg, shuffle, stop_words):
+def get_shuffle_list(file_pos, file_neg, shuffle, stop_words):
     xylist = []
     list_pos = MyReviews(file_pos)
     list_neg = MyReviews(file_neg)

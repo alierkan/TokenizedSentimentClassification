@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-import utils
+from sklearn.metrics import accuracy_score
+from src import utils
 
 BATCH_SIZE = 16
 NCOLS = 300
@@ -11,13 +11,14 @@ NCOLS_MUL = 2
 HIDDEN_DIM = 600
 NWIN = 5
 NUM_EPOCHS = 25
-NUM_CLASSES = 3
+NUM_CLASSES = 3  # 3 for Positive, Negative, Neutral and 2 for Positive, Negative.
 NUM_FILTERS = 600
 NUM_TRIALS = 10
 KERNEL_SIZE = (4, 600)
-PATH = "/../"
-CUDA = "cuda"
+PATH = "/../"  # Has to be defined
 sigmoid = nn.Sigmoid()
+WORD2VEC_PATH = PATH + 'word2vec.txt'
+GLOVE_FILE = "glove.txt"
 
 
 def get_review_windows(model, reviews, max_rlen, nsen, glove_dict):
@@ -97,7 +98,7 @@ def run(train_loader, test_loader, max_len, device):
             y_prob.append(probabilities)
 
         accuracies.append(accuracy_score(y_true, y_pred))
-        with open(PATH + "CNN3_scores_" + str(trial + 1) + ".txt", 'w') as outfile:
+        with open(PATH + "CNN_scores_" + str(trial + 1) + ".txt", 'w') as outfile:
             for t, p, prob in zip(y_true, y_pred, y_prob):
                 outfile.write(str(int(t)) + ";" + str(int(p)) + ";" + ";".join(str(p) for p in prob) + "\n")
 
@@ -108,19 +109,25 @@ def run(train_loader, test_loader, max_len, device):
 
 def main():
     stop_words = utils.get_stopwords()
-    vw_model = utils.get_word2vec_model(PATH + 'word2vec/yelp-all_word2vector', NCOLS, NWIN)
+    vw_model = utils.get_word2vec_model(WORD2VEC_PATH, NCOLS, NWIN)
     vw_model.vectors = utils.unit(vw_model.vectors)
-    glove_dict = utils.get_glove_data(PATH + 'glove/', 'vectors' + '.txt')
+    glove_dict = utils.get_glove_data(PATH, GLOVE_FILE)
     glove_dict = utils.unitDic(glove_dict)
 
-    # Semeval 2016
-    train_list = utils.get_shuffle_list_neutral(PATH + 'train-pos.txt',
-                                                PATH + 'train-neg.txt',
-                                                PATH + 'train-neu.txt', True, stop_words)
+    if NUM_CLASSES == 3:
+        train_list = utils.get_shuffle_list_neutral(PATH + 'train-pos.txt',
+                                                    PATH + 'train-neg.txt',
+                                                    PATH + 'train-neu.txt', True, stop_words)
 
-    test_list = utils.get_shuffle_list_neutral(PATH + 'test-pos.txt',
-                                               PATH + 'test-neg.txt',
-                                               PATH + 'test-neu.txt', False, stop_words)
+        test_list = utils.get_shuffle_list_neutral(PATH + 'test-pos.txt',
+                                                   PATH + 'test-neg.txt',
+                                                   PATH + 'test-neu.txt', False, stop_words)
+    elif NUM_CLASSES == 2:
+        train_list = utils.get_shuffle_list(PATH + 'train-pos.txt',
+                                            PATH + 'train-neg.txt', True, stop_words)
+
+        test_list = utils.get_shuffle_list(PATH + 'test-pos.txt',
+                                           PATH + 'test-neg.txt', False, stop_words)
 
     max_rlen = utils.get_max_number_of_token_list(train_list, test_list)
     train_x, train_y = get_review_windows(vw_model, train_list, max_rlen, len(train_list), glove_dict)
@@ -135,7 +142,7 @@ def main():
 if __name__ == "__main__":
     is_cuda = torch.cuda.is_available()
     if is_cuda:
-        device = torch.device(CUDA)
+        device = torch.device("cuda")
     else:
         device = torch.device("cpu")
     main()

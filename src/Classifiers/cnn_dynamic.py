@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn.metrics import accuracy_score
-import utils
+from src import utils
 import torch.nn.functional as F
 
 BATCH_SIZE = 16
@@ -15,7 +15,9 @@ NUM_CLASSES = 3
 NUM_FILTERS = 600
 NUM_TRIALS = 10
 KERNEL_SIZE = (4, 600)
-PATH = "/../"
+PATH = "/../"  # Has to be defined.
+WORD2VEC_PATH = PATH + 'word2vec.txt'
+GLOVE_FILE = "glove.txt"
 
 
 def get_review_windows(vocab_txt_to_id, reviews, max_rlen, nsen):
@@ -76,22 +78,27 @@ class SimpleCNN(nn.Module):
 
 def main():
     stop_words = utils.get_stopwords()
-    vw_model = utils.get_word2vec_model(PATH + 'word2vec/all_word2vector', NCOLS, NWIN)
+    vw_model = utils.get_word2vec_model(WORD2VEC_PATH, NCOLS, NWIN)
     vw_model.vectors = utils.normalize2(vw_model.vectors)
-    glove_dict = utils.get_glove_data(PATH + 'glove/', 'vectors' + '.txt')
-    vocab_txt_to_id, max_rlen = utils.to_number(PATH + "all.txt")
-    # vocab_id_to_txt = {v: k for k, v in vocab_txt_to_id.items()}
+    glove_dict = utils.get_glove_data(PATH, GLOVE_FILE)
+    vocab_txt_to_id, max_rlen = utils.to_number(PATH + "all.txt")  # Combine all files as all.txt
     vocabs = list(vocab_txt_to_id.keys())
     pretrained_embeddings = get_pretrained(vocab_txt_to_id, vw_model, vocabs, glove_dict)
 
-    # Semeval 2016
-    train_list = utils.get_shuffle_list_neutral(PATH + 'train-pos.txt',
-                                                PATH + 'train-neg.txt',
-                                                PATH + 'train-neu.txt', True, stop_words)
+    if NUM_CLASSES == 3:
+        train_list = utils.get_shuffle_list_neutral(PATH + 'train-pos.txt',
+                                                    PATH + 'train-neg.txt',
+                                                    PATH + 'train-neu.txt', True, stop_words)
 
-    test_list = utils.get_shuffle_list_neutral(PATH + 'test-pos.txt',
-                                               PATH + 'test-neg.txt',
-                                               PATH + 'test-neu.txt', False, stop_words)
+        test_list = utils.get_shuffle_list_neutral(PATH + 'test-pos.txt',
+                                                   PATH + 'test-neg.txt',
+                                                   PATH + 'test-neu.txt', False, stop_words)
+    elif NUM_CLASSES == 2:
+        train_list = utils.get_shuffle_list(PATH + 'train-pos.txt',
+                                            PATH + 'train-neg.txt', True, stop_words)
+
+        test_list = utils.get_shuffle_list(PATH + 'test-pos.txt',
+                                           PATH + 'test-neg.txt', False, stop_words)
 
     train_x, train_y = get_review_windows(vocab_txt_to_id, train_list, max_rlen, len(train_list))
     test_x, test_y = get_review_windows(vocab_txt_to_id, test_list, max_rlen, len(test_list))
@@ -149,7 +156,6 @@ def main():
         y_probabilities = F.softmax(y_probabilities, dim=1).cpu().detach().numpy()
         with open(PATH + "Dynamic_CNN_scores_" + str(trial+101) + ".txt", 'w') as outfile:
             for t, p, prob in zip(y_true, y_pred, y_probabilities):
-                # norm_p = [(p - min(prob))/(max(prob) - min(prob)) for p in prob]
                 prob_str = ",".join([str(p) for p in prob])
                 outfile.write(str(int(t)) + ";" + str(int(p)) + ";" + prob_str + "\n")
     print("### ACCURACIES ###")

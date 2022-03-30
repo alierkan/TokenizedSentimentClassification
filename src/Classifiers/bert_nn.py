@@ -1,26 +1,27 @@
 import re
 import numpy as np
 import torch
+from src import utils
 from transformers import BertTokenizer
+from src import constants as con
 import random
 import torch.nn as nn
-from transformers import BertModel
+from transformers import BertModel, BertForSequenceClassification
 from transformers import AdamW, get_linear_schedule_with_warmup
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 import time
-import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, roc_curve, auc
+from sklearn.metrics import accuracy_score
 
-PATH = "/../"
-NCOLS = 768
-NWIN = 5
-NUM_EPOCHS = 1
-NUM_CLASSES = 2
-NUM_FILTERS = 768
-NUM_TRIALS = 1
-KERNEL_SIZE = (4, 768)
-MAX_LEN = 512
-
+path_dic = con.get_paths(con.TWITTER)
+PATH = path_dic.get(con.WORD)
+NUM_EPOCHS = 20
+NUM_TRIALS = 10
+NUM_CLASSES = 3  # 3 for Positive, Negative, Neutral and 2 for Positive, Negative
+BERT_DIM = 768  # For Bert-Base
+HIDDEN_DIM = 128
+BATCH_SIZE = 16
+PRETRAINED_BERT = 'bert-base-uncased'  # For English
+# PRETRAINED_BERT = "dbmdz/bert-base-turkish-uncased"  # For Turkish
 
 class MyReviews(object):
     def __init__(self, filename):
@@ -32,14 +33,18 @@ class MyReviews(object):
             yield line
 
 
-def get_shuffle_list_neutral(file_pos, file_neg, shuffle):
+def get_shuffle_list(file_pos, file_neg, file_neu, shuffle):
     xylist = []
     list_pos = MyReviews(file_pos)
     list_neg = MyReviews(file_neg)
     for t in list_pos:
-        xylist.append((t, [1, 0]))
+        xylist.append((t, [1, 0, 0]))
     for t in list_neg:
-        xylist.append((t, [0, 1]))
+        xylist.append((t, [0, 0, 1]))
+    if file_neu:
+        list_neu = MyReviews(file_neu)
+        for t in list_neu:
+            xylist.append((t, [0, 1, 0]))
     if shuffle:
         random.shuffle(xylist)
     return xylist
@@ -74,7 +79,7 @@ def text_preprocessing_bert(text):
 
 
 # Load the BERT tokenizer
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+tokenizer = BertTokenizer.from_pretrained(PRETRAINED_BERT, do_lower_case=True)
 
 
 # Create a function to tokenize a set of texts
@@ -104,7 +109,6 @@ def preprocessing_for_bert(data, max_len):
             max_length=max_len,  # Max length to truncate/pad
             # pad_to_max_length=True,  # Pad sentence to max length
             padding='max_length',
-            truncation='longest_first',
             # return_tensors='pt',           # Return PyTorch tensor
             return_attention_mask=True  # Return attention mask
         )
@@ -125,24 +129,26 @@ class BertClassifier(nn.Module):
     """Bert Model for Classification Tasks.
     """
 
-    def __init__(self, max_rlen, kernel_size, class_num, freeze_bert=False):
+    def __init__(self, freeze_bert=False):
         """
         @param    bert: a BertModel object
         @param    classifier: a torch.nn.Module classifier
         @param    freeze_bert (bool): Set `False` to fine-tune the BERT model
         """
         super(BertClassifier, self).__init__()
-        # Instantiate BERT model
-        self.bert = BertModel.from_pretrained('bert-base-uncased')
+        # Specify hidden size of BERT, hidden size of our classifier, and number of labels
+        D_in, H, D_out = BERT_DIM, HIDDEN_DIM, NUM_CLASSES
 
-        self.kernel_size = kernel_size
-        self.max_rlen = max_rlen
-        self.conv1 = nn.Conv2d(1, NUM_FILTERS, kernel_size=(kernel_size[0], kernel_size[1]), stride=(1,1), padding=0)
-        self.batchNorm2d = nn.BatchNorm2d(NUM_FILTERS)
-        self.pool = nn.MaxPool2d(kernel_size=(max_rlen - kernel_size[0] + 1, 1), stride=1, padding=0)
-        self.dropout = nn.Dropout(0.2)
-        self.fc1 = nn.Linear(NUM_FILTERS * (NCOLS - kernel_size[1] + 1), max_rlen)
-        self.fc2 = nn.Linear(max_rlen, class_num)
+        # Instantiate BERT model
+        self.bert = BertModel.from_pretrained(PRETRAINED_BERT)
+
+        # Instantiate an one-layer feed-forward classifier
+        self.classifier = nn.Sequential(
+            nn.Linear(D_in, H),
+            nn.ReLU(),
+            # nn.Dropout(0.2),
+            nn.Linear(H, D_out)
+        )
 
         # Freeze the BERT model
         if freeze_bert:
@@ -164,26 +170,20 @@ class BertClassifier(nn.Module):
                             attention_mask=attention_mask)
 
         # Extract the last hidden state of the token `[CLS]` for classification task
-        x = outputs[0]
-        x.unsqueeze_(1)
-        x = self.conv1(x)
-        x = torch.tanh(x)
-        x = self.batchNorm2d(x)
-        x = self.pool(x)
-        x = self.dropout(x)
-        x = x.view(-1, NUM_FILTERS * (NCOLS - self.kernel_size[1] + 1))
-        x = self.fc1(x)
-        x = torch.tanh(x)
-        logits = self.fc2(x)
+        out = outputs[0]
+        last_hidden_state_cls = outputs[0][:, 0, :]
+
+        # Feed input to classifier to compute logits
+        logits = self.classifier(last_hidden_state_cls)
 
         return logits
 
 
-def initialize_model(train_dataloader, max_len, epochs=4):
+def initialize_model(train_dataloader, epochs=4):
     """Initialize the Bert Classifier, the optimizer and the learning rate scheduler.
     """
     # Instantiate Bert Classifier
-    bert_classifier = BertClassifier(max_len, KERNEL_SIZE, NUM_CLASSES, freeze_bert=False)
+    bert_classifier = BertClassifier(freeze_bert=False)
 
     # Tell PyTorch to run the model on GPU
     bert_classifier.to(device)
@@ -199,13 +199,13 @@ def initialize_model(train_dataloader, max_len, epochs=4):
 
     # Set up the learning rate scheduler
     scheduler = get_linear_schedule_with_warmup(optimizer,
-                                                num_warmup_steps=0,  # Default value
+                                                num_warmup_steps=0, # Default value
                                                 num_training_steps=total_steps)
     return bert_classifier, optimizer, scheduler
 
 
 # Specify loss function
-loss_fn = nn.BCEWithLogitsLoss()
+loss_fn = nn.CrossEntropyLoss()
 
 
 def set_seed(seed_value=42):
@@ -249,10 +249,10 @@ def train(model, optimizer, scheduler, train_dataloader, test_dataloader=None, e
             model.zero_grad()
             # Perform a forward pass. This will return logits.
             logits = model(b_input_ids, b_attn_mask)
-            b_labels = b_labels.type_as(logits)
+
             # Compute loss and accumulate the loss values
-            loss = loss_fn(logits, b_labels)
-            # loss = loss_fn(logits, torch.max(b_labels, 1)[1])
+            # loss = loss_fn(logits, b_labels)
+            loss = loss_fn(logits, torch.max(b_labels, 1)[1])
             batch_loss += loss.item()
             total_loss += loss.item()
 
@@ -323,10 +323,8 @@ def evaluate(model, test_dataloader):
         with torch.no_grad():
             logits = model(b_input_ids, b_attn_mask)
 
-        b_labels = b_labels.type_as(logits)
         # Compute loss
-        loss = loss_fn(logits, b_labels)
-        # loss = loss_fn(logits, torch.max(b_labels, 1)[1])
+        loss = loss_fn(logits, torch.max(b_labels, 1)[1])
         val_loss.append(loss.item())
 
         # Get the predictions
@@ -367,38 +365,63 @@ def bert_predict(model, test_dataloader):
     all_logits = torch.cat(all_logits, dim=0)
 
     # Apply softmax to calculate probabilities
-    probs = F.softmax(all_logits, dim=1).cpu().numpy()
+    # probs = F.softmax(all_logits, dim=1).cpu().numpy()
+
+    taylor = utils.TaylorSoftmax()
+    probs = taylor(all_logits).cpu().numpy()
 
     return probs
 
 
 def main():
-    # IMDB
-    train_list = get_shuffle_list_neutral(PATH + 'train-pos.txt',
-                                          PATH + 'train-neg.txt', True)
-
-    test_list = get_shuffle_list_neutral(PATH + 'test-pos.txt',
-                                         PATH + 'test-neg.txt', False)
-
-    train_x, train_y = get_review_windows(train_list)
-    test_x, test_y = get_review_windows(test_list)
-
-    # Concatenate train data and test data
-    all_text = np.concatenate([train_x, test_x])
-
     acc_list = []
     for trial in range(NUM_TRIALS):
+        if NUM_CLASSES == 3:
+            train_list = get_shuffle_list(PATH + 'train-pos.txt',
+                                          PATH + 'train-neg.txt',
+                                          PATH + 'train-neu.txt', True)
+
+            test_list = get_shuffle_list(PATH + 'test-pos.txt',
+                                         PATH + 'test-neg.txt',
+                                         PATH + 'test-neu.txt', False)
+        elif NUM_CLASSES == 2:
+            train_list = get_shuffle_list(PATH + 'train-pos.txt',
+                                          PATH + 'train-neg.txt',
+                                          None, True)
+
+            test_list = get_shuffle_list(PATH + 'test-pos.txt',
+                                         PATH + 'test-neg.txt',
+                                         None, False)
+
+        train_x, train_y = get_review_windows(train_list)
+        test_x, test_y = get_review_windows(test_list)
+
+        # Concatenate train data and test data
+        all_text = np.concatenate([train_x, test_x])
+
+        # Encode our concatenated data
+        encoded_text = [tokenizer.encode(sent, add_special_tokens=True) for sent in all_text]
+
+        # Find the maximum length
+        max_len = max([len(sent) for sent in encoded_text])
+        print('Max length: ', max_len)
+
+        # Print sentence 0 and its encoded token ids
+        token_ids = list(preprocessing_for_bert([train_x[0]], max_len)[0].squeeze().numpy())
+        print('Original: ', train_x[0])
+        print('Token IDs: ', token_ids)
+
         # Run function `preprocessing_for_bert` on the train set and the validation set
         print('Tokenizing data...')
-        train_inputs, train_masks = preprocessing_for_bert(train_x, MAX_LEN)
-        test_inputs, test_masks = preprocessing_for_bert(test_x, MAX_LEN)
+        train_inputs, train_masks = preprocessing_for_bert(train_x, max_len)
+        test_inputs, test_masks = preprocessing_for_bert(test_x, max_len)
 
         # Convert other data types to torch.Tensor
         train_labels = torch.tensor(train_y)
         test_labels = torch.tensor(test_y)
 
         # For fine-tuning BERT, the authors recommend a batch size of 16 or 32.
-        batch_size = 4
+        batch_size = BATCH_SIZE
 
         # Create the DataLoader for our training set
         train_data = TensorDataset(train_inputs, train_masks, train_labels)
@@ -411,7 +434,7 @@ def main():
         test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=batch_size)
 
         set_seed(42)  # Set seed for reproducibility
-        bert_classifier, optimizer, scheduler = initialize_model(train_dataloader, MAX_LEN, epochs=NUM_EPOCHS)
+        bert_classifier, optimizer, scheduler = initialize_model(train_dataloader, epochs=NUM_EPOCHS)
         train(bert_classifier, optimizer, scheduler, train_dataloader, test_dataloader, epochs=NUM_EPOCHS, evaluation=True)
 
         # Compute predicted probabilities on the test set
@@ -423,9 +446,9 @@ def main():
         y_pred = np.argmax(probs, axis=1)
         acc_list.append(accuracy_score(y_true, y_pred))
         print('################# Trial[{}] ###############'.format(trial + 1))
-        with open(PATH + "BERT_CNN_scores_" + str(trial+1) + ".txt", 'w') as outfile:
+        with open(PATH + "BERT_NN_BASE_scores_" + str(trial+1) + ".txt", 'w') as outfile:
             for t, p, prob in zip(y_true, y_pred, probs.tolist()):
-                outfile.write(str(int(t)) + ";" + str(int(p)) + ";" + ";".join(str(pr) for pr in prob) + "\n")
+                outfile.write(str(int(t)) + ";" + str(int(p)) + ";" + ";".join([str(pr) for pr in prob]) + "\n")
     for accuracy in acc_list:
         print(f'{accuracy:.8f}')
 
