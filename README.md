@@ -45,3 +45,7 @@ Used datasets are:
 ## Embedding:
 
 **word2vec_generate.py** : Word2vec generator by using gensim.
+
+### Ensemble : 
+
+**ensemble.py** : Ensemble of different models.
