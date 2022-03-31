@@ -1,7 +1,5 @@
 # Tokenized Sentiment Classification
 
-## Tokenizers:
-
 By using non-contextualized (Word2Vec and GloVe) and contextualized (BERT and RoBERTa) 
 embeddings over some tokenization methods, classifiers learn to estimate 
 sentiment polarities of reviews.  
@@ -13,6 +11,8 @@ Used datasets are:
 2. Semeval 2016 Task 5 Restaurant Dataset (https://alt.qcri.org/semeval2016/task5/index.php?id=data-and-tools).
 3. Semeval 2017 Task 6 Twitter Dataset.
 4. Beyazperde Turkish Movie Dataset (http://humirapps.cs.hacettepe.edu.tr/tsad.aspx.)
+
+## Tokenizers:
 
 **bpe.py** : Byte pair encoding
 
